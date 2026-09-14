@@ -1,0 +1,13 @@
+alembic==1.14.1
+boto3==1.36.16
+email-validator==2.2.0
+fastapi==0.115.8
+httpx==0.28.1
+psycopg[binary]==3.2.4
+pyjwt==2.10.1
+pwdlib[argon2]==0.2.1
+pydantic-settings==2.7.1
+pytest==8.3.4
+ruff==0.9.5
+sqlalchemy==2.0.38
+uvicorn[standard]==0.34.0
