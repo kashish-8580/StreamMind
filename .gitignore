@@ -8,5 +8,6 @@ __pycache__/
 .ruff_cache/
 node_modules/
 dist/
+*.tsbuildinfo
 coverage/
 postgres-data/

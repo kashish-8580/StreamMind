@@ -14,18 +14,48 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-streammind}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-streammind_dev_secret}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-streammind}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-streammind_dev_secret}
+      S3_UPLOAD_BUCKET: ${S3_UPLOAD_BUCKET:-streammind-original-videos}
+    volumes:
+      - ./minio/cors.xml:/config/cors.xml:ro
+    entrypoint: >-
+      /bin/sh -c '
+      until mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do sleep 1; done;
+      mc mb --ignore-existing "local/$${S3_UPLOAD_BUCKET}";
+      mc anonymous set none "local/$${S3_UPLOAD_BUCKET}";
+      mc cors set "local/$${S3_UPLOAD_BUCKET}" /config/cors.xml;
+      '
   backend:
     build: ./backend
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://streammind:streammind_dev_password@postgres:5432/streammind}
       JWT_SECRET: ${JWT_SECRET:-replace-with-a-long-random-secret-before-deploying}
-      AWS_REGION: ${AWS_REGION:-ap-south-1}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
       S3_UPLOAD_BUCKET: ${S3_UPLOAD_BUCKET:-streammind-original-videos}
-      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-http://localhost:9000}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-2147483648}
       PRESIGNED_UPLOAD_EXPIRE_SECONDS: ${PRESIGNED_UPLOAD_EXPIRE_SECONDS:-900}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-streammind}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-streammind_dev_secret}
       AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
     ports:
       - "8000:8000"
@@ -34,6 +64,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
   frontend:
     build: ./frontend
@@ -46,3 +78,4 @@ services:
       - backend
 volumes:
   postgres-data:
+  minio-data:
