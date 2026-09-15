@@ -64,6 +64,33 @@ def test_unready_video_cannot_be_played(client, storage):
     assert response.status_code == 409
 
 
+def test_user_can_read_and_search_timestamped_transcript(client):
+    from app.database import SessionLocal
+    from app.models import TranscriptSegment, Video
+
+    token = register(client)
+    created = client.post("/videos", headers=headers(token), json={"title": "Searchable"}).json()
+    video_id = uuid.UUID(created["id"])
+    with SessionLocal() as db:
+        video = db.get(Video, video_id)
+        video.transcript_status = "COMPLETED"
+        db.add_all(
+            [
+                TranscriptSegment(video_id=video_id, start_seconds=0, end_seconds=4, text="Welcome to StreamMind", language="en"),
+                TranscriptSegment(video_id=video_id, start_seconds=4, end_seconds=8, text="Queues make processing durable", language="en"),
+            ]
+        )
+        db.commit()
+
+    transcript = client.get(f"/videos/{video_id}/transcript", headers=headers(token))
+    results = client.get(f"/videos/{video_id}/transcript/search?q=durable", headers=headers(token))
+
+    assert transcript.status_code == 200
+    assert len(transcript.json()["segments"]) == 2
+    assert results.status_code == 200
+    assert [segment["start_seconds"] for segment in results.json()["segments"]] == [4]
+
+
 def test_user_can_request_and_complete_an_upload(client, storage, processing_queue):
     token = register(client)
     requested = client.post(

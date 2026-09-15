@@ -15,3 +15,8 @@ span { color: #67e8f9; font-size: .75rem; letter-spacing: .06em; }
 .player-card video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #020617; }
 .player-card div { display: flex; align-items: center; justify-content: space-between; padding: 1rem; }
 .quiet { background: transparent; color: #94a3b8; border: 1px solid #334155; }
+.transcript { padding: 0 1rem 1rem; border-top: 1px solid #1e293b; }
+.transcript form { margin: 1rem 0; }
+.transcript p { display: flex; gap: .75rem; line-height: 1.5; }
+.transcript time { flex: 0 0 3rem; color: #67e8f9; font-variant-numeric: tabular-nums; }
+.transcript .transcript-status { color: #94a3b8; font-size: .85rem; text-transform: uppercase; }

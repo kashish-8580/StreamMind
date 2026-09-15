@@ -10,8 +10,11 @@ type Video = {
   description: string | null;
   status: string;
   duration_seconds: number | null;
+  transcript_status: string;
 };
 type Playback = { manifest: string; thumbnail_url: string; expires_in: number };
+type TranscriptSegment = { id: string; start_seconds: number; end_seconds: number; text: string; language: string | null };
+type Transcript = { video_id: string; status: string; segments: TranscriptSegment[] };
 
 function VideoPlayer({ playback, title }: { playback: Playback; title: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -51,7 +54,8 @@ function App() {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [selected, setSelected] = useState<{ video: Video; playback: Playback } | null>(null);
+  const [selected, setSelected] = useState<{ video: Video; playback: Playback; transcript: Transcript } | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   async function loadVideos(accessToken = token) {
     const response = await fetch(`${API_URL}/videos`, {
@@ -114,21 +118,50 @@ function App() {
 
   async function playVideo(video: Video) {
     setError("");
-    const response = await fetch(`${API_URL}/videos/${video.id}/playback`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!response.ok) {
-      setError((await response.json()).detail ?? "Could not prepare playback");
+    const requestHeaders = { Authorization: `Bearer ${token}` };
+    const [playbackResponse, transcriptResponse] = await Promise.all([
+      fetch(`${API_URL}/videos/${video.id}/playback`, { headers: requestHeaders }),
+      fetch(`${API_URL}/videos/${video.id}/transcript`, { headers: requestHeaders }),
+    ]);
+    if (!playbackResponse.ok || !transcriptResponse.ok) {
+      setError("Could not load the video and transcript");
       return;
     }
-    setSelected({ video, playback: await response.json() });
+    setSearchQuery("");
+    setSelected({ video, playback: await playbackResponse.json(), transcript: await transcriptResponse.json() });
+  }
+
+  async function searchTranscript(event: FormEvent) {
+    event.preventDefault();
+    if (!selected) return;
+    const path = searchQuery.trim()
+      ? `/videos/${selected.video.id}/transcript/search?q=${encodeURIComponent(searchQuery.trim())}`
+      : `/videos/${selected.video.id}/transcript`;
+    const response = await fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (response.ok) setSelected({ ...selected, transcript: await response.json() });
   }
 
   useEffect(() => {
-    if (!token || !videos.some((video) => ["QUEUED", "PROCESSING"].includes(video.status))) return;
+    if (!token || !videos.some((video) =>
+      ["QUEUED", "PROCESSING"].includes(video.status)
+      || ["QUEUED", "PROCESSING"].includes(video.transcript_status)
+    )) return;
     const timer = window.setInterval(() => void loadVideos(), 3000);
     return () => window.clearInterval(timer);
   }, [token, videos]);
+
+  useEffect(() => {
+    if (!selected || !["QUEUED", "PROCESSING"].includes(selected.transcript.status)) return;
+    const timer = window.setInterval(async () => {
+      const response = await fetch(`${API_URL}/videos/${selected.video.id}/transcript`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) return;
+      const transcript = await response.json();
+      setSelected((current) => current?.video.id === selected.video.id ? { ...current, transcript } : current);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [token, selected?.video.id, selected?.transcript.status]);
 
   if (!token) {
     return (
@@ -158,12 +191,22 @@ function App() {
         <section className="player-card">
           <VideoPlayer playback={selected.playback} title={selected.video.title} />
           <div><strong>{selected.video.title}</strong><button className="quiet" onClick={() => setSelected(null)}>Close</button></div>
+          <section className="transcript">
+            <form onSubmit={searchTranscript}>
+              <input aria-label="Search transcript" placeholder="Search transcript" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} />
+              <button>Search</button>
+            </form>
+            <p className="transcript-status">Transcript: {selected.transcript.status.replaceAll("_", " ")}</p>
+            {selected.transcript.segments.map((segment) => (
+              <p key={segment.id}><time>{Math.floor(segment.start_seconds / 60)}:{String(Math.floor(segment.start_seconds % 60)).padStart(2, "0")}</time>{segment.text}</p>
+            ))}
+          </section>
         </section>
       )}
       <ul>
         {videos.map((video) => (
           <li key={video.id}>
-            <div><strong>{video.title}</strong><span>{video.status.replaceAll("_", " ")}</span></div>
+            <div><strong>{video.title}</strong><span>{video.status.replaceAll("_", " ")} · transcript {video.transcript_status.replaceAll("_", " ")}</span></div>
             {video.status === "STREAM_READY" && <button onClick={() => void playVideo(video)}>Play</button>}
           </li>
         ))}

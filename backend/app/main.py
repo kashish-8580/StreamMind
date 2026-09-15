@@ -2,14 +2,14 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import User, Video, VideoProcessingJob
+from app.models import TranscriptSegment, User, Video, VideoProcessingJob
 from app.queue import ProcessingQueue, QueueUnavailableError, get_processing_queue
 from app.config import settings
 from app.schemas import (
@@ -17,6 +17,7 @@ from app.schemas import (
     PlaybackResponse,
     RegisterRequest,
     TokenResponse,
+    TranscriptResponse,
     UploadUrlRequest,
     UploadUrlResponse,
     ProcessingJobResponse,
@@ -256,3 +257,52 @@ def get_video_playback(
         thumbnail_url=storage.create_processed_download_url(video.thumbnail_key),
         expires_in=settings.presigned_upload_expire_seconds,
     )
+
+
+def _owned_video(video_id: uuid.UUID, user_id: uuid.UUID, db: Session) -> Video:
+    video = db.get(Video, video_id)
+    if video is None or video.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
+    return video
+
+
+@app.get("/videos/{video_id}/transcript", response_model=TranscriptResponse)
+def get_video_transcript(
+    video_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TranscriptResponse:
+    video = _owned_video(video_id, current_user.id, db)
+    segments = list(
+        db.scalars(
+            select(TranscriptSegment)
+            .where(TranscriptSegment.video_id == video.id)
+            .order_by(TranscriptSegment.start_seconds)
+        )
+    )
+    return TranscriptResponse(video_id=video.id, status=video.transcript_status, segments=segments)
+
+
+@app.get("/videos/{video_id}/transcript/search", response_model=TranscriptResponse)
+def search_video_transcript(
+    video_id: uuid.UUID,
+    q: str = Query(min_length=1, max_length=200),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TranscriptResponse:
+    video = _owned_video(video_id, current_user.id, db)
+    escaped_query = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    if not escaped_query:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Search query cannot be blank")
+    segments = list(
+        db.scalars(
+            select(TranscriptSegment)
+            .where(
+                TranscriptSegment.video_id == video.id,
+                TranscriptSegment.text.ilike(f"%{escaped_query}%", escape="\\"),
+            )
+            .order_by(TranscriptSegment.start_seconds)
+            .limit(100)
+        )
+    )
+    return TranscriptResponse(video_id=video.id, status=video.transcript_status, segments=segments)

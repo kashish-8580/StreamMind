@@ -38,6 +38,7 @@ class VideoResponse(BaseModel):
     hls_manifest_key: str | None
     thumbnail_key: str | None
     duration_seconds: float | None
+    transcript_status: str
     created_at: datetime
     updated_at: datetime
 
@@ -81,3 +82,19 @@ class PlaybackResponse(BaseModel):
     manifest: str
     thumbnail_url: str
     expires_in: int
+
+
+class TranscriptSegmentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    start_seconds: float
+    end_seconds: float
+    text: str
+    language: str | None
+
+
+class TranscriptResponse(BaseModel):
+    video_id: uuid.UUID
+    status: str
+    segments: list[TranscriptSegmentResponse]

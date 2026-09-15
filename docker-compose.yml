@@ -74,6 +74,7 @@ services:
       AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
       SQS_ENDPOINT_URL: ${SQS_ENDPOINT_URL:-http://elasticmq:9324}
       VIDEO_PROCESSING_QUEUE_URL: ${VIDEO_PROCESSING_QUEUE_URL:-http://elasticmq:9324/000000000000/video-processing}
+      TRANSCRIPTION_QUEUE_URL: ${TRANSCRIPTION_QUEUE_URL:-http://elasticmq:9324/000000000000/transcription}
     ports:
       - "8000:8000"
     volumes:
@@ -106,7 +107,33 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-streammind_dev_secret}
       SQS_ENDPOINT_URL: ${SQS_ENDPOINT_URL:-http://elasticmq:9324}
       VIDEO_PROCESSING_QUEUE_URL: ${VIDEO_PROCESSING_QUEUE_URL:-http://elasticmq:9324/000000000000/video-processing}
+      TRANSCRIPTION_QUEUE_URL: ${TRANSCRIPTION_QUEUE_URL:-http://elasticmq:9324/000000000000/transcription}
       MAX_VIDEO_DURATION_SECONDS: ${MAX_VIDEO_DURATION_SECONDS:-7200}
+    depends_on:
+      backend:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      elasticmq:
+        condition: service_healthy
+  transcription-worker:
+    build:
+      context: .
+      dockerfile: workers/transcription/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://streammind:streammind_dev_password@postgres:5432/streammind}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      S3_UPLOAD_BUCKET: ${S3_UPLOAD_BUCKET:-streammind-original-videos}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-streammind}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-streammind_dev_secret}
+      SQS_ENDPOINT_URL: ${SQS_ENDPOINT_URL:-http://elasticmq:9324}
+      TRANSCRIPTION_QUEUE_URL: ${TRANSCRIPTION_QUEUE_URL:-http://elasticmq:9324/000000000000/transcription}
+      WHISPER_MODEL: ${WHISPER_MODEL:-tiny}
+      OMP_NUM_THREADS: ${WHISPER_CPU_THREADS:-4}
+    volumes:
+      - whisper-models:/models
     depends_on:
       backend:
         condition: service_healthy
@@ -127,3 +154,4 @@ volumes:
   postgres-data:
   minio-data:
   elasticmq-data:
+  whisper-models:

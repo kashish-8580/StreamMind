@@ -65,6 +65,24 @@ The frontend refreshes queued/processing states automatically and shows a Play
 button when a video becomes ready. It uses native HLS where available and loads
 HLS.js on demand in other modern browsers.
 
+## Local transcription and search
+
+After video processing, a separate durable `transcription` queue hands the
+original video to the CPU-only transcription worker. It extracts mono 16 kHz
+audio with FFmpeg, transcribes it locally with Faster Whisper, and stores
+timestamped segments in PostgreSQL. The video remains playable while this
+independent AI stage runs.
+
+- `GET /videos/{id}/transcript` returns ordered timestamped segments and status.
+- `GET /videos/{id}/transcript/search?q=...` searches up to 100 matching segments.
+- The player displays transcript progress, text, timestamps, and search results.
+
+The default `tiny` multilingual model keeps local CPU and memory usage low. Its
+first use downloads the open-source model into the persistent `whisper-models`
+Docker volume. Set `WHISPER_MODEL=base` or `small` for better accuracy at the
+cost of a larger download and slower CPU processing. No AWS or paid AI API is
+needed for this workflow.
+
 Accepted formats are MP4, QuickTime/MOV, and WebM. The default size limit is
 2 GiB and presigned forms expire after 15 minutes. The bucket must remain private;
 the presigned form grants narrowly scoped, temporary upload access. For AWS

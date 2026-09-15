@@ -12,7 +12,8 @@ class QueueUnavailableError(Exception):
 
 
 class ProcessingQueue:
-    def __init__(self) -> None:
+    def __init__(self, queue_url: str | None = None) -> None:
+        self.queue_url = queue_url or settings.video_processing_queue_url
         kwargs: dict[str, Any] = {"region_name": settings.aws_region}
         if settings.sqs_endpoint_url:
             kwargs["endpoint_url"] = settings.sqs_endpoint_url
@@ -21,7 +22,7 @@ class ProcessingQueue:
     def enqueue(self, message: dict[str, str]) -> str:
         try:
             response = self.client.send_message(
-                QueueUrl=settings.video_processing_queue_url,
+                QueueUrl=self.queue_url,
                 MessageBody=json.dumps(message),
             )
         except (BotoCoreError, ClientError) as exc:
@@ -31,7 +32,7 @@ class ProcessingQueue:
     def receive(self) -> list[dict[str, str]]:
         try:
             response = self.client.receive_message(
-                QueueUrl=settings.video_processing_queue_url,
+                QueueUrl=self.queue_url,
                 MaxNumberOfMessages=1,
                 WaitTimeSeconds=20,
                 AttributeNames=["ApproximateReceiveCount"],
@@ -43,7 +44,7 @@ class ProcessingQueue:
     def delete(self, receipt_handle: str) -> None:
         try:
             self.client.delete_message(
-                QueueUrl=settings.video_processing_queue_url,
+                QueueUrl=self.queue_url,
                 ReceiptHandle=receipt_handle,
             )
         except (BotoCoreError, ClientError) as exc:

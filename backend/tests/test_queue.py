@@ -23,6 +23,7 @@ class SqsClient:
 def test_processing_message_is_serialized_for_sqs():
     storage = ProcessingQueue.__new__(ProcessingQueue)
     storage.client = SqsClient()
+    storage.queue_url = settings.video_processing_queue_url
     message = {"job_id": "job-1", "video_id": "video-1"}
 
     message_id = storage.enqueue(message)
@@ -35,6 +36,7 @@ def test_processing_message_is_serialized_for_sqs():
 def test_processing_message_can_be_received_and_deleted():
     queue = ProcessingQueue.__new__(ProcessingQueue)
     queue.client = SqsClient()
+    queue.queue_url = settings.video_processing_queue_url
 
     messages = queue.receive()
     queue.delete(messages[0]["ReceiptHandle"])

@@ -16,7 +16,9 @@ class Settings(BaseSettings):
     presigned_upload_expire_seconds: int = 900
     sqs_endpoint_url: str | None = None
     video_processing_queue_url: str = "http://elasticmq:9324/000000000000/video-processing"
+    transcription_queue_url: str = "http://elasticmq:9324/000000000000/transcription"
     max_video_duration_seconds: int = 7200
+    whisper_model: str = "tiny"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

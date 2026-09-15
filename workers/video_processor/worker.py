@@ -7,6 +7,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sqlalchemy import select
+
 from app.config import settings
 from app.database import SessionLocal
 from app.models import Video, VideoProcessingJob
@@ -18,7 +20,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 
-def process_message(message: dict, queue: ProcessingQueue, storage: S3Storage, ffmpeg: FFmpegService) -> None:
+def process_message(
+    message: dict,
+    queue: ProcessingQueue,
+    transcription_queue: ProcessingQueue,
+    storage: S3Storage,
+    ffmpeg: FFmpegService,
+) -> None:
     payload = json.loads(message["Body"])
     job_id = uuid.UUID(payload["job_id"])
     video_id = uuid.UUID(payload["video_id"])
@@ -66,6 +74,31 @@ def process_message(message: dict, queue: ProcessingQueue, storage: S3Storage, f
                 video.thumbnail_key = thumbnail_key
                 video.duration_seconds = metadata["duration_seconds"]
                 video.status = "STREAM_READY"
+                transcription_job = db.scalar(
+                    select(VideoProcessingJob).where(
+                        VideoProcessingJob.video_id == video.id,
+                        VideoProcessingJob.job_type == "TRANSCRIPTION",
+                    )
+                )
+                if transcription_job is None:
+                    transcription_job = VideoProcessingJob(
+                        video_id=video.id,
+                        job_type="TRANSCRIPTION",
+                        status="PENDING",
+                    )
+                    db.add(transcription_job)
+                    db.flush()
+                if transcription_job.status not in {"QUEUED", "PROCESSING", "COMPLETED"}:
+                    transcription_job.queue_message_id = transcription_queue.enqueue(
+                        {
+                            "job_id": str(transcription_job.id),
+                            "video_id": str(video.id),
+                            "object_key": payload["object_key"],
+                            "job_type": "TRANSCRIPTION",
+                        }
+                    )
+                    transcription_job.status = "QUEUED"
+                    video.transcript_status = "QUEUED"
                 job.status = "COMPLETED"
                 job.completed_at = datetime.now(timezone.utc)
                 db.commit()
@@ -84,13 +117,14 @@ def process_message(message: dict, queue: ProcessingQueue, storage: S3Storage, f
 
 def run() -> None:
     queue = ProcessingQueue()
+    transcription_queue = ProcessingQueue(settings.transcription_queue_url)
     storage = S3Storage()
     ffmpeg = FFmpegService(settings.max_video_duration_seconds)
     logger.info("Video processor started")
     while True:
         try:
             for message in queue.receive():
-                process_message(message, queue, storage, ffmpeg)
+                process_message(message, queue, transcription_queue, storage, ffmpeg)
         except QueueUnavailableError:
             logger.exception("Processing queue unavailable")
             time.sleep(5)
