@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any
 
 import boto3
@@ -48,6 +49,17 @@ class S3Storage:
             if error_code in {"404", "NoSuchKey", "NotFound"}:
                 raise ObjectNotFoundError(object_key) from exc
             raise
+
+    def download_original(self, object_key: str, destination: Path) -> None:
+        self.client.download_file(settings.s3_upload_bucket, object_key, str(destination))
+
+    def upload_processed(self, source: Path, object_key: str, content_type: str) -> None:
+        self.client.upload_file(
+            str(source),
+            settings.s3_processed_bucket,
+            object_key,
+            ExtraArgs={"ContentType": content_type},
+        )
 
 
 def get_storage() -> S3Storage:

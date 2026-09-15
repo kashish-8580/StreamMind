@@ -36,6 +36,9 @@ class Video(Base):
     uploaded_file_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     upload_etag: Mapped[str | None] = mapped_column(String(255), nullable=True)
     upload_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hls_manifest_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    thumbnail_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    duration_seconds: Mapped[float | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 

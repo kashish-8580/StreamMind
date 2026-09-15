@@ -28,6 +28,27 @@ class ProcessingQueue:
             raise QueueUnavailableError from exc
         return response["MessageId"]
 
+    def receive(self) -> list[dict[str, str]]:
+        try:
+            response = self.client.receive_message(
+                QueueUrl=settings.video_processing_queue_url,
+                MaxNumberOfMessages=1,
+                WaitTimeSeconds=20,
+                AttributeNames=["ApproximateReceiveCount"],
+            )
+        except (BotoCoreError, ClientError) as exc:
+            raise QueueUnavailableError from exc
+        return response.get("Messages", [])
+
+    def delete(self, receipt_handle: str) -> None:
+        try:
+            self.client.delete_message(
+                QueueUrl=settings.video_processing_queue_url,
+                ReceiptHandle=receipt_handle,
+            )
+        except (BotoCoreError, ClientError) as exc:
+            raise QueueUnavailableError from exc
+
 
 def get_processing_queue() -> ProcessingQueue:
     return ProcessingQueue()

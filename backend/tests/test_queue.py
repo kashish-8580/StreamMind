@@ -12,6 +12,13 @@ class SqsClient:
         self.request = kwargs
         return {"MessageId": "message-123"}
 
+    def receive_message(self, **kwargs):
+        self.request = kwargs
+        return {"Messages": [{"MessageId": "message-123", "ReceiptHandle": "receipt"}]}
+
+    def delete_message(self, **kwargs):
+        self.request = kwargs
+
 
 def test_processing_message_is_serialized_for_sqs():
     storage = ProcessingQueue.__new__(ProcessingQueue)
@@ -23,3 +30,14 @@ def test_processing_message_is_serialized_for_sqs():
     assert message_id == "message-123"
     assert storage.client.request["QueueUrl"] == settings.video_processing_queue_url
     assert json.loads(storage.client.request["MessageBody"]) == message
+
+
+def test_processing_message_can_be_received_and_deleted():
+    queue = ProcessingQueue.__new__(ProcessingQueue)
+    queue.client = SqsClient()
+
+    messages = queue.receive()
+    queue.delete(messages[0]["ReceiptHandle"])
+
+    assert messages[0]["MessageId"] == "message-123"
+    assert queue.client.request["ReceiptHandle"] == "receipt"

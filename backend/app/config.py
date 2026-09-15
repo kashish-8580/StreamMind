@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     aws_region: str = "us-east-1"
     s3_upload_bucket: str = "streammind-original-videos"
+    s3_processed_bucket: str = "streammind-processed-videos"
     s3_endpoint_url: str | None = None
     s3_public_endpoint_url: str | None = None
     s3_force_path_style: bool = False
@@ -15,6 +16,7 @@ class Settings(BaseSettings):
     presigned_upload_expire_seconds: int = 900
     sqs_endpoint_url: str | None = None
     video_processing_queue_url: str = "http://elasticmq:9324/000000000000/video-processing"
+    max_video_duration_seconds: int = 7200
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

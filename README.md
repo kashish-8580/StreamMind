@@ -1,6 +1,6 @@
 # StreamMind
 
-StreamMind is an AI-powered video knowledge and streaming platform. The current local vertical slice provides authentication, an ownership-scoped video library, and direct video uploads to private MinIO object storage.
+StreamMind is an AI-powered video knowledge and streaming platform. The current local vertical slice provides authentication, an ownership-scoped video library, direct video uploads to private MinIO object storage, and asynchronous FFmpeg processing.
 
 ## Local development
 
@@ -36,10 +36,23 @@ automatically:
 3. `POST /videos/{id}/complete-upload`; the API verifies the object in storage
    and saves a durable processing job before publishing it to the queue.
 
-The resulting states are `PENDING_UPLOAD → UPLOADED → QUEUED`. If queue
+The upload states are `PENDING_UPLOAD → UPLOADED → QUEUED`. If queue
 publication fails, the upload and pending database job remain safe so a repeated
 completion request can retry. Duplicate completion requests do not create a
 second job after successful publication.
+
+## Local video processing
+
+The `video-worker` service consumes the durable processing queue, downloads the
+original from MinIO, validates it with FFprobe, creates a 720p HLS rendition and
+JPEG thumbnail with FFmpeg, and uploads the assets to the private processed-video
+bucket. A successful job advances through `QUEUED → PROCESSING → STREAM_READY`.
+The video record then contains its duration, HLS manifest key, and thumbnail key.
+
+Failed processing attempts are recorded as `PROCESSING_FAILED`, including a
+diagnostic message on the job. The queue message is left for retry and eventually
+moves to the configured dead-letter queue after repeated failures. The worker
+starts only after migrations and the API health check complete.
 
 Accepted formats are MP4, QuickTime/MOV, and WebM. The default size limit is
 2 GiB and presigned forms expire after 15 minutes. The bucket must remain private;
@@ -53,6 +66,6 @@ and bucket name; the application-level upload flow remains the same.
 - `backend/`: FastAPI API, database models, migrations, and tests
 - `elasticmq/`: local SQS-compatible queue and DLQ configuration
 - `infra/`: planned AWS CDK application
-- `workers/`: planned asynchronous video and AI processing workers
+- `workers/`: asynchronous FFmpeg video processing worker and tests
 
 The detailed project plan is currently maintained in the workspace-level `../plan.md` and should be committed into this repository before the first push.

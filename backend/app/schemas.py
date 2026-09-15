@@ -35,6 +35,9 @@ class VideoResponse(BaseModel):
     expected_file_size: int | None
     uploaded_file_size: int | None
     upload_completed_at: datetime | None
+    hls_manifest_key: str | None
+    thumbnail_key: str | None
+    duration_seconds: float | None
     created_at: datetime
     updated_at: datetime
 
