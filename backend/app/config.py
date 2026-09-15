@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     s3_force_path_style: bool = False
     max_upload_bytes: int = 2 * 1024 * 1024 * 1024
     presigned_upload_expire_seconds: int = 900
+    sqs_endpoint_url: str | None = None
+    video_processing_queue_url: str = "http://elasticmq:9324/000000000000/video-processing"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

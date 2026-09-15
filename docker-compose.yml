@@ -40,6 +40,19 @@ services:
       mc mb --ignore-existing "local/$${S3_UPLOAD_BUCKET}";
       mc anonymous set none "local/$${S3_UPLOAD_BUCKET}";
       '
+  elasticmq:
+    image: softwaremill/elasticmq-native@sha256:e4580ab9ad1bd5cd37b4ba04911bc5ccc8cd2d9ab4de56ece65acee71c24e05c
+    ports:
+      - "9324:9324"
+    volumes:
+      - ./elasticmq/elasticmq.conf:/opt/elasticmq.conf:ro
+      - elasticmq-data:/data
+    command: -Dconfig.file=/opt/elasticmq.conf
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9324/?Action=ListQueues&Version=2012-11-05"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
   backend:
     build: ./backend
     environment:
@@ -55,6 +68,8 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-streammind}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-streammind_dev_secret}
       AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      SQS_ENDPOINT_URL: ${SQS_ENDPOINT_URL:-http://elasticmq:9324}
+      VIDEO_PROCESSING_QUEUE_URL: ${VIDEO_PROCESSING_QUEUE_URL:-http://elasticmq:9324/000000000000/video-processing}
     ports:
       - "8000:8000"
     volumes:
@@ -64,6 +79,8 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      elasticmq:
+        condition: service_healthy
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
   frontend:
     build: ./frontend
@@ -77,3 +94,4 @@ services:
 volumes:
   postgres-data:
   minio-data:
+  elasticmq-data:

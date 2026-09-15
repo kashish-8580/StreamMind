@@ -54,3 +54,21 @@ class UploadUrlResponse(BaseModel):
     video: VideoResponse
     upload: PresignedPost
     expires_in: int
+
+
+class ProcessingJobResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    job_type: str
+    status: str
+    attempt_count: int
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class VideoStatusResponse(BaseModel):
+    video_id: uuid.UUID
+    video_status: str
+    processing_job: ProcessingJobResponse | None

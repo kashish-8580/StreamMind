@@ -28,7 +28,7 @@ def test_user_cannot_read_another_users_video(client):
     assert response.status_code == 404
 
 
-def test_user_can_request_and_complete_an_upload(client, storage):
+def test_user_can_request_and_complete_an_upload(client, storage, processing_queue):
     token = register(client)
     requested = client.post(
         "/videos/upload-url",
@@ -55,8 +55,23 @@ def test_user_can_request_and_complete_an_upload(client, storage):
         headers=headers(token),
     )
     assert completed.status_code == 200
-    assert completed.json()["status"] == "UPLOADED"
+    assert completed.json()["status"] == "QUEUED"
     assert completed.json()["uploaded_file_size"] == 1234
+    assert processing_queue.messages[0]["video_id"] == body["video"]["id"]
+
+    repeated = client.post(
+        f"/videos/{body['video']['id']}/complete-upload",
+        headers=headers(token),
+    )
+    assert repeated.status_code == 200
+    assert len(processing_queue.messages) == 1
+
+    job_status = client.get(
+        f"/videos/{body['video']['id']}/status",
+        headers=headers(token),
+    )
+    assert job_status.status_code == 200
+    assert job_status.json()["processing_job"]["status"] == "QUEUED"
 
 
 def test_upload_rejects_unsupported_media_type(client, storage):
@@ -67,3 +82,45 @@ def test_upload_rejects_unsupported_media_type(client, storage):
         json={"title": "Not a video", "filename": "payload.exe", "content_type": "application/octet-stream", "file_size": 10},
     )
     assert response.status_code == 415
+
+
+def test_queue_failure_preserves_upload_and_pending_job(client, storage, processing_queue):
+    token = register(client)
+    requested = client.post(
+        "/videos/upload-url",
+        headers=headers(token),
+        json={
+            "title": "Retryable upload",
+            "filename": "retry.mp4",
+            "content_type": "video/mp4",
+            "file_size": 50,
+        },
+    ).json()
+    storage.objects[requested["upload"]["fields"]["key"]] = {
+        "ContentLength": 50,
+        "ContentType": "video/mp4",
+        "ETag": '"retry-etag"',
+    }
+    processing_queue.available = False
+
+    failed = client.post(
+        f"/videos/{requested['video']['id']}/complete-upload",
+        headers=headers(token),
+    )
+    assert failed.status_code == 503
+
+    status_after_failure = client.get(
+        f"/videos/{requested['video']['id']}/status",
+        headers=headers(token),
+    ).json()
+    assert status_after_failure["video_status"] == "UPLOADED"
+    assert status_after_failure["processing_job"]["status"] == "PENDING"
+
+    processing_queue.available = True
+    retried = client.post(
+        f"/videos/{requested['video']['id']}/complete-upload",
+        headers=headers(token),
+    )
+    assert retried.status_code == 200
+    assert retried.json()["status"] == "QUEUED"
+    assert len(processing_queue.messages) == 1

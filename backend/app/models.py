@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -36,5 +36,22 @@ class Video(Base):
     uploaded_file_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     upload_etag: Mapped[str | None] = mapped_column(String(255), nullable=True)
     upload_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class VideoProcessingJob(Base):
+    __tablename__ = "video_processing_jobs"
+    __table_args__ = (UniqueConstraint("video_id", "job_type", name="uq_video_processing_job_type"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    video_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("videos.id", ondelete="CASCADE"), index=True)
+    job_type: Mapped[str] = mapped_column(String(50), default="VIDEO_PROCESSING")
+    status: Mapped[str] = mapped_column(String(32), default="PENDING")
+    attempt_count: Mapped[int] = mapped_column(default=0)
+    queue_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)

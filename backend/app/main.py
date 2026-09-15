@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import User, Video
+from app.models import User, Video, VideoProcessingJob
+from app.queue import ProcessingQueue, QueueUnavailableError, get_processing_queue
 from app.config import settings
 from app.schemas import (
     LoginRequest,
@@ -17,8 +18,10 @@ from app.schemas import (
     TokenResponse,
     UploadUrlRequest,
     UploadUrlResponse,
+    ProcessingJobResponse,
     VideoCreate,
     VideoResponse,
+    VideoStatusResponse,
 )
 from app.security import create_access_token, hash_password, verify_password
 from app.storage import ObjectNotFoundError, S3Storage, get_storage
@@ -120,31 +123,69 @@ def complete_upload(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     storage: S3Storage = Depends(get_storage),
+    queue: ProcessingQueue = Depends(get_processing_queue),
 ) -> Video:
     video = db.get(Video, video_id)
     if video is None or video.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
-    if video.status == "UPLOADED":
+    if video.status == "QUEUED":
         return video
-    if video.status != "PENDING_UPLOAD" or video.original_s3_key is None:
+    if video.status not in {"PENDING_UPLOAD", "UPLOADED"} or video.original_s3_key is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Video is not awaiting an upload")
 
-    try:
-        uploaded = storage.inspect_object(video.original_s3_key)
-    except ObjectNotFoundError:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Uploaded object was not found")
+    if video.status == "PENDING_UPLOAD":
+        try:
+            uploaded = storage.inspect_object(video.original_s3_key)
+        except ObjectNotFoundError:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Uploaded object was not found")
 
-    actual_size = int(uploaded["ContentLength"])
-    actual_type = uploaded.get("ContentType")
-    if actual_size != video.expected_file_size or actual_type != video.content_type:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Uploaded object does not match its declaration")
+        actual_size = int(uploaded["ContentLength"])
+        actual_type = uploaded.get("ContentType")
+        if actual_size != video.expected_file_size or actual_type != video.content_type:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Uploaded object does not match its declaration",
+            )
 
-    video.status = "UPLOADED"
-    video.uploaded_file_size = actual_size
-    video.upload_etag = str(uploaded.get("ETag", "")).strip('"') or None
-    video.upload_completed_at = datetime.now(timezone.utc)
+        video.status = "UPLOADED"
+        video.uploaded_file_size = actual_size
+        video.upload_etag = str(uploaded.get("ETag", "")).strip('"') or None
+        video.upload_completed_at = datetime.now(timezone.utc)
+
+    job = db.scalar(
+        select(VideoProcessingJob).where(
+            VideoProcessingJob.video_id == video.id,
+            VideoProcessingJob.job_type == "VIDEO_PROCESSING",
+        )
+    )
+    if job is None:
+        job = VideoProcessingJob(video_id=video.id, job_type="VIDEO_PROCESSING", status="PENDING")
+        db.add(job)
     db.commit()
-    db.refresh(video)
+    db.refresh(job)
+
+    if job.status != "QUEUED":
+        try:
+            message_id = queue.enqueue(
+                {
+                    "job_id": str(job.id),
+                    "video_id": str(video.id),
+                    "user_id": str(current_user.id),
+                    "bucket": settings.s3_upload_bucket,
+                    "object_key": video.original_s3_key,
+                    "job_type": "VIDEO_PROCESSING",
+                }
+            )
+        except QueueUnavailableError:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Upload is saved; processing will be queued when the queue is available",
+            )
+        job.status = "QUEUED"
+        job.queue_message_id = message_id
+        video.status = "QUEUED"
+        db.commit()
+        db.refresh(video)
     return video
 
 
@@ -159,3 +200,24 @@ def get_video(video_id: uuid.UUID, current_user: User = Depends(get_current_user
     if video is None or video.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
     return video
+
+
+@app.get("/videos/{video_id}/status", response_model=VideoStatusResponse)
+def get_video_status(
+    video_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> VideoStatusResponse:
+    video = db.get(Video, video_id)
+    if video is None or video.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
+    job = db.scalar(
+        select(VideoProcessingJob)
+        .where(VideoProcessingJob.video_id == video.id)
+        .order_by(VideoProcessingJob.created_at.desc())
+    )
+    return VideoStatusResponse(
+        video_id=video.id,
+        video_status=video.status,
+        processing_job=ProcessingJobResponse.model_validate(job) if job else None,
+    )

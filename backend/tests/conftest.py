@@ -11,6 +11,7 @@ os.environ["JWT_SECRET"] = "test-secret"
 
 from app.database import Base, engine  # noqa: E402
 from app.main import app  # noqa: E402
+from app.queue import QueueUnavailableError, get_processing_queue  # noqa: E402
 from app.storage import ObjectNotFoundError, get_storage  # noqa: E402
 
 
@@ -28,6 +29,18 @@ class FakeStorage:
         if object_key not in self.objects:
             raise ObjectNotFoundError(object_key)
         return self.objects[object_key]
+
+
+class FakeQueue:
+    def __init__(self):
+        self.messages = []
+        self.available = True
+
+    def enqueue(self, message):
+        if not self.available:
+            raise QueueUnavailableError
+        self.messages.append(message)
+        return f"message-{len(self.messages)}"
 
 
 @pytest.fixture(autouse=True)
@@ -49,3 +62,11 @@ def storage():
     app.dependency_overrides[get_storage] = lambda: fake
     yield fake
     app.dependency_overrides.pop(get_storage, None)
+
+
+@pytest.fixture
+def processing_queue():
+    fake = FakeQueue()
+    app.dependency_overrides[get_processing_queue] = lambda: fake
+    yield fake
+    app.dependency_overrides.pop(get_processing_queue, None)
