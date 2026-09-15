@@ -24,7 +24,7 @@ The backend runs database migrations before starting. Run tests with `docker com
 
 The upload API uses an S3-compatible presigned POST so video bytes travel
 directly from the browser to object storage instead of through FastAPI. Docker
-Compose starts MinIO, creates a private bucket, and applies the local CORS policy
+Compose starts MinIO, creates a private bucket, and allows the local frontend origin
 automatically:
 
 1. `POST /videos/upload-url` with the title, filename, content type, and exact
@@ -43,7 +43,6 @@ and bucket name; the application-level upload flow remains the same.
 
 - `frontend/`: React + TypeScript UI
 - `backend/`: FastAPI API, database models, migrations, and tests
-- `minio/`: local object-storage configuration
 - `infra/`: planned AWS CDK application
 - `workers/`: planned asynchronous video and AI processing workers
 
