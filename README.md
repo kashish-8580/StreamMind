@@ -54,6 +54,17 @@ diagnostic message on the job. The queue message is left for retry and eventuall
 moves to the configured dead-letter queue after repeated failures. The worker
 starts only after migrations and the API health check complete.
 
+## Secure local playback
+
+For a `STREAM_READY` video, `GET /videos/{id}/playback` verifies ownership and
+returns the HLS manifest with short-lived signed URLs for every media segment,
+plus a signed thumbnail URL. The private processed-video bucket therefore stays
+closed to anonymous access. These URLs expire after 15 minutes by default.
+
+The frontend refreshes queued/processing states automatically and shows a Play
+button when a video becomes ready. It uses native HLS where available and loads
+HLS.js on demand in other modern browsers.
+
 Accepted formats are MP4, QuickTime/MOV, and WebM. The default size limit is
 2 GiB and presigned forms expire after 15 minutes. The bucket must remain private;
 the presigned form grants narrowly scoped, temporary upload access. For AWS

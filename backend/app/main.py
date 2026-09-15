@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +14,7 @@ from app.queue import ProcessingQueue, QueueUnavailableError, get_processing_que
 from app.config import settings
 from app.schemas import (
     LoginRequest,
+    PlaybackResponse,
     RegisterRequest,
     TokenResponse,
     UploadUrlRequest,
@@ -220,4 +221,38 @@ def get_video_status(
         video_id=video.id,
         video_status=video.status,
         processing_job=ProcessingJobResponse.model_validate(job) if job else None,
+    )
+
+
+@app.get("/videos/{video_id}/playback", response_model=PlaybackResponse)
+def get_video_playback(
+    video_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    storage: S3Storage = Depends(get_storage),
+) -> PlaybackResponse:
+    video = db.get(Video, video_id)
+    if video is None or video.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
+    if video.status != "STREAM_READY" or not video.hls_manifest_key or not video.thumbnail_key:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Video is not ready for playback")
+
+    manifest_key = PurePosixPath(video.hls_manifest_key)
+    manifest = storage.read_processed_text(video.hls_manifest_key)
+    rewritten_lines: list[str] = []
+    for line in manifest.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            rewritten_lines.append(line)
+            continue
+        relative_asset = PurePosixPath(stripped)
+        if relative_asset.is_absolute() or ".." in relative_asset.parts:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid stream manifest")
+        asset_key = str(manifest_key.parent / relative_asset)
+        rewritten_lines.append(storage.create_processed_download_url(asset_key))
+
+    return PlaybackResponse(
+        manifest="\n".join(rewritten_lines) + "\n",
+        thumbnail_url=storage.create_processed_download_url(video.thumbnail_key),
+        expires_in=settings.presigned_upload_expire_seconds,
     )

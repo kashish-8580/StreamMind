@@ -75,3 +75,9 @@ class VideoStatusResponse(BaseModel):
     video_id: uuid.UUID
     video_status: str
     processing_job: ProcessingJobResponse | None
+
+
+class PlaybackResponse(BaseModel):
+    manifest: str
+    thumbnail_url: str
+    expires_in: int

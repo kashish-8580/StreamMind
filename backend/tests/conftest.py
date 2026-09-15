@@ -18,6 +18,7 @@ from app.storage import ObjectNotFoundError, get_storage  # noqa: E402
 class FakeStorage:
     def __init__(self):
         self.objects = {}
+        self.processed_text = {}
 
     def create_upload(self, object_key, content_type, file_size):
         return {
@@ -29,6 +30,12 @@ class FakeStorage:
         if object_key not in self.objects:
             raise ObjectNotFoundError(object_key)
         return self.objects[object_key]
+
+    def read_processed_text(self, object_key):
+        return self.processed_text[object_key]
+
+    def create_processed_download_url(self, object_key):
+        return f"https://media.example.test/{object_key}?signature=test"
 
 
 class FakeQueue:

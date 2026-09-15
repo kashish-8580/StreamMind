@@ -1,3 +1,6 @@
+import uuid
+
+
 def register(client, email="person@example.com", password="correct-horse-battery"):
     response = client.post("/auth/register", json={"email": email, "password": password})
     assert response.status_code == 201
@@ -26,6 +29,39 @@ def test_user_cannot_read_another_users_video(client):
 
     response = client.get(f"/videos/{video_id}", headers=headers(second_token))
     assert response.status_code == 404
+
+
+def test_ready_video_returns_signed_playback_manifest(client, storage):
+    from app.database import SessionLocal
+    from app.models import Video
+
+    token = register(client)
+    created = client.post("/videos", headers=headers(token), json={"title": "Ready video"}).json()
+    manifest_key = f"users/user/videos/{created['id']}/hls/index.m3u8"
+    with SessionLocal() as db:
+        video = db.get(Video, uuid.UUID(created["id"]))
+        video.status = "STREAM_READY"
+        video.hls_manifest_key = manifest_key
+        video.thumbnail_key = f"users/user/videos/{created['id']}/thumbnail.jpg"
+        db.commit()
+    storage.processed_text[manifest_key] = "#EXTM3U\n#EXTINF:2.0,\nsegment_00000.ts\n#EXT-X-ENDLIST\n"
+
+    response = client.get(f"/videos/{created['id']}/playback", headers=headers(token))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "https://media.example.test/users/user/videos/" in body["manifest"]
+    assert "segment_00000.ts?signature=test" in body["manifest"]
+    assert body["thumbnail_url"].endswith("thumbnail.jpg?signature=test")
+
+
+def test_unready_video_cannot_be_played(client, storage):
+    token = register(client)
+    created = client.post("/videos", headers=headers(token), json={"title": "Not ready"}).json()
+
+    response = client.get(f"/videos/{created['id']}/playback", headers=headers(token))
+
+    assert response.status_code == 409
 
 
 def test_user_can_request_and_complete_an_upload(client, storage, processing_queue):

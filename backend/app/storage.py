@@ -21,6 +21,10 @@ class S3Storage:
         if settings.s3_endpoint_url:
             kwargs["endpoint_url"] = settings.s3_endpoint_url
         self.client = boto3.client("s3", **kwargs)
+        public_kwargs = dict(kwargs)
+        if settings.s3_public_endpoint_url:
+            public_kwargs["endpoint_url"] = settings.s3_public_endpoint_url
+        self.public_client = boto3.client("s3", **public_kwargs)
 
     def create_upload(self, object_key: str, content_type: str, file_size: int) -> dict[str, Any]:
         upload = self.client.generate_presigned_post(
@@ -59,6 +63,17 @@ class S3Storage:
             settings.s3_processed_bucket,
             object_key,
             ExtraArgs={"ContentType": content_type},
+        )
+
+    def read_processed_text(self, object_key: str) -> str:
+        response = self.client.get_object(Bucket=settings.s3_processed_bucket, Key=object_key)
+        return response["Body"].read().decode("utf-8")
+
+    def create_processed_download_url(self, object_key: str) -> str:
+        return self.public_client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": settings.s3_processed_bucket, "Key": object_key},
+            ExpiresIn=settings.presigned_upload_expire_seconds,
         )
 
 

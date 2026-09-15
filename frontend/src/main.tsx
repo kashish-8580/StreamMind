@@ -1,9 +1,46 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import type HlsType from "hls.js";
 import "./styles.css";
 
 const API_URL = "http://localhost:8000";
-type Video = { id: string; title: string; description: string | null; status: string };
+type Video = {
+  id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  duration_seconds: number | null;
+};
+type Playback = { manifest: string; thumbnail_url: string; expires_in: number };
+
+function VideoPlayer({ playback, title }: { playback: Playback; title: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const player = videoRef.current;
+    if (!player) return;
+    const manifestUrl = URL.createObjectURL(new Blob([playback.manifest], { type: "application/vnd.apple.mpegurl" }));
+    let hls: HlsType | null = null;
+    let disposed = false;
+    if (player.canPlayType("application/vnd.apple.mpegurl")) {
+      player.src = manifestUrl;
+    } else {
+      void import("hls.js").then(({ default: Hls }) => {
+        if (disposed || !Hls.isSupported()) return;
+        hls = new Hls();
+        hls.loadSource(manifestUrl);
+        hls.attachMedia(player);
+      });
+    }
+    return () => {
+      disposed = true;
+      hls?.destroy();
+      URL.revokeObjectURL(manifestUrl);
+    };
+  }, [playback]);
+
+  return <video ref={videoRef} controls poster={playback.thumbnail_url} aria-label={`Playing ${title}`} />;
+}
 
 function App() {
   const [email, setEmail] = useState("");
@@ -14,6 +51,7 @@ function App() {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [selected, setSelected] = useState<{ video: Video; playback: Playback } | null>(null);
 
   async function loadVideos(accessToken = token) {
     const response = await fetch(`${API_URL}/videos`, {
@@ -74,6 +112,24 @@ function App() {
     }
   }
 
+  async function playVideo(video: Video) {
+    setError("");
+    const response = await fetch(`${API_URL}/videos/${video.id}/playback`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      setError((await response.json()).detail ?? "Could not prepare playback");
+      return;
+    }
+    setSelected({ video, playback: await response.json() });
+  }
+
+  useEffect(() => {
+    if (!token || !videos.some((video) => ["QUEUED", "PROCESSING"].includes(video.status))) return;
+    const timer = window.setInterval(() => void loadVideos(), 3000);
+    return () => window.clearInterval(timer);
+  }, [token, videos]);
+
   if (!token) {
     return (
       <main>
@@ -98,8 +154,19 @@ function App() {
         <button disabled={busy}>{busy ? "Uploading…" : "Upload video"}</button>
       </form>
       {error && <p className="error">{error}</p>}
+      {selected && (
+        <section className="player-card">
+          <VideoPlayer playback={selected.playback} title={selected.video.title} />
+          <div><strong>{selected.video.title}</strong><button className="quiet" onClick={() => setSelected(null)}>Close</button></div>
+        </section>
+      )}
       <ul>
-        {videos.map((video) => <li key={video.id}><strong>{video.title}</strong><span>{video.status}</span></li>)}
+        {videos.map((video) => (
+          <li key={video.id}>
+            <div><strong>{video.title}</strong><span>{video.status.replaceAll("_", " ")}</span></div>
+            {video.status === "STREAM_READY" && <button onClick={() => void playVideo(video)}>Play</button>}
+          </li>
+        ))}
       </ul>
     </main>
   );
